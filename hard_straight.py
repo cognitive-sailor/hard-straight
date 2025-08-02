@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 from bpy.types import Operator, Panel
 import time
+import random
 
 
 class WORKPIECE_OT_ImportSTL(Operator):
@@ -170,54 +171,74 @@ class WORKPIECE_OT_Alignment(Operator):
                 self.report({'INFO'}, f"Sample face normals (first 3): {face_normals[:3]}")
 
             # Step 6: Create vertex groups for +PC3 and -PC3, +PC2 and -PC2, +PC1 and -PC1
-            for vg_name in ["+PC3", "-PC3", "+PC2", "-PC2", "+PC1", "-PC1"]:
+            vertex_coords = {
+                "top": [],
+                "bottom": [],
+                "front": [],
+                "back": [],
+                "right": [],
+                "left": []
+            }
+            for vg_name in vertex_coords.keys():
                 if vg_name in obj.vertex_groups:
                     obj.vertex_groups.remove(obj.vertex_groups[vg_name])
-            vg_1 = obj.vertex_groups.new(name="+PC3")
-            vg_2 = obj.vertex_groups.new(name="-PC3")
-            vg_3 = obj.vertex_groups.new(name="+PC2")
-            vg_4 = obj.vertex_groups.new(name="-PC2")
-            vg_5 = obj.vertex_groups.new(name="+PC1")
-            vg_6 = obj.vertex_groups.new(name="-PC1")
+            vg_1 = obj.vertex_groups.new(name="top")
+            vg_2 = obj.vertex_groups.new(name="bottom")
+            vg_3 = obj.vertex_groups.new(name="front")
+            vg_4 = obj.vertex_groups.new(name="back")
+            vg_5 = obj.vertex_groups.new(name="right")
+            vg_6 = obj.vertex_groups.new(name="left")
             
             for face_idx in pc3_pos_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_1.add([vert_idx], 1.0, "REPLACE")
+                    vertex_coords["top"].append(obj.matrix_world @ mesh.vertices[vert_idx].co)
             
             for face_idx in pc3_neg_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_2.add([vert_idx], 1.0, "REPLACE")
+                    vertex_coords["bottom"].append(obj.matrix_world @ mesh.vertices[vert_idx].co)
 
             for face_idx in pc2_pos_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_3.add([vert_idx], 1.0, "REPLACE")
+                    vertex_coords["front"].append(obj.matrix_world @ mesh.vertices[vert_idx].co)
             
             for face_idx in pc2_neg_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_4.add([vert_idx], 1.0, "REPLACE")
+                    vertex_coords["back"].append(obj.matrix_world @ mesh.vertices[vert_idx].co)
             
             for face_idx in pc1_pos_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_5.add([vert_idx], 1.0, "REPLACE")
+                    vertex_coords["right"].append(obj.matrix_world @ mesh.vertices[vert_idx].co)
 
             for face_idx in pc1_neg_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_6.add([vert_idx], 1.0, "REPLACE")
+                    vertex_coords["left"].append(obj.matrix_world @ mesh.vertices[vert_idx].co)
+
+            # Store vertex coordinates in mesh custom properties
+            for vg_name, coords in vertex_coords.items():
+                coords_flat = np.array(coords).flatten().tolist() if coords else []
+                obj.data[f"flatness_coords_{vg_name}"] = coords_flat
+                obj.data[f"flatness_coords_{vg_name}_count"] = len(coords)
 
             # Step 6.5: Create or assign materials for each vertex group
             material_map = {
-                "Z": ("+PC3", pc3_pos_faces, (0.0, 0.0, 1.0)),  # Blue for top (+z_axis)
-                "-Z": ("-PC3", pc3_neg_faces, (0.05, 0.05, 0.2)),  # Dark blue for bottom (-z_axis)
-                "Y": ("+PC2", pc2_pos_faces, (0.0, 1.0, 0.0)),   # Green for front (+y_axis)
-                "-Y": ("-PC2", pc2_neg_faces, (0.05, 0.2, 0.05)),  # Dark green for back (-y_axis)
-                "X": ("+PC1", pc1_pos_faces, (1.0, 0.0, 0.0)),   # Red for right (+x_axis)
-                "-X": ("-PC1", pc1_neg_faces, (0.2, 0.05, 0.05))   # Dark red for left (-x_axis)
+                "Z": ("top", pc3_pos_faces, (0.0, 0.0, 1.0)),  # Blue for top (+z_axis)
+                "-Z": ("bottom", pc3_neg_faces, (0.05, 0.05, 0.2)),  # Dark blue for bottom (-z_axis)
+                "Y": ("front", pc2_pos_faces, (0.0, 1.0, 0.0)),   # Green for front (+y_axis)
+                "-Y": ("back", pc2_neg_faces, (0.05, 0.2, 0.05)),  # Dark green for back (-y_axis)
+                "X": ("right", pc1_pos_faces, (1.0, 0.0, 0.0)),   # Red for right (+x_axis)
+                "-X": ("left", pc1_neg_faces, (0.2, 0.05, 0.05))   # Dark red for left (-x_axis)
             }
 
             # Clear existing material slots
@@ -327,6 +348,93 @@ class WORKPIECE_OT_Alignment(Operator):
 
         self.report({'INFO'}, f"Alignment operation executed in {time.time() - t:.3f} seconds")
         return {'FINISHED'}
+    
+class WORKPIECE_OT_Flatness(Operator):
+    bl_idname = "workpiece.flatness"
+    bl_label = "Calculate Flatness"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Calculate flatness of selected vertex groups using Gaussian method"
+
+    def execute(self, context):
+        obj = bpy.context.active_object
+        if not obj or obj.type != 'MESH':
+            self.report({'ERROR'}, "No active mesh object found")
+            return {'CANCELLED'}
+
+        t = time.time()
+        mesh = obj.data
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Map vertex group names to tick box properties
+        vg_map = {
+            "top": context.scene.flatness_top,
+            "bottom": context.scene.flatness_bottom,
+            "front": context.scene.flatness_front,
+            "back": context.scene.flatness_back,
+            "right": context.scene.flatness_right,
+            "left": context.scene.flatness_left
+        }
+
+        selected_vgs = [vg_name for vg_name, enabled in vg_map.items() if enabled]
+        if not selected_vgs:
+            self.report({'ERROR'}, "No vertex groups selected for flatness calculation")
+            return {'CANCELLED'}
+
+        max_vertices = context.scene.flatness_max_vertices
+        for vg_name in selected_vgs:
+            if vg_name not in obj.vertex_groups:
+                self.report({'WARNING'}, f"Vertex group '{vg_name}' not found, skipping")
+                continue
+
+            # Retrieve stored vertex coordinates
+            coords_key = f"flatness_coords_{vg_name}"
+            count_key = f"flatness_coords_{vg_name}_count"
+            if coords_key not in obj.data or count_key not in obj.data:
+                self.report({'WARNING'}, f"No stored coordinates for '{vg_name}', run Align Workpiece first")
+                continue
+
+            coords_flat = obj.data[coords_key]
+            num_vertices = obj.data[count_key]
+            if num_vertices == 0:
+                self.report({'WARNING'}, f"Vertex group '{vg_name}' is empty, skipping")
+                continue
+
+            # Reshape flat list to NumPy array (n x 3)
+            vertices = np.array(coords_flat).reshape(-1, 3)
+            
+            # Sample vertices if too many
+            if max_vertices > 0 and len(vertices) > max_vertices:
+                indices = random.sample(range(len(vertices)), max_vertices)
+                vertices = vertices[indices]
+                self.report({'INFO'}, f"Sampled {max_vertices} vertices from '{vg_name}' (total: {num_vertices})")
+
+            # Fit plane using PCA (SVD)
+            centroid = np.mean(vertices, axis=0)
+            centered = vertices - centroid
+            _, _, vh = np.linalg.svd(centered)
+            normal = vh[2, :]  # Third singular vector (least variance) is plane normal
+            normal = normal / np.linalg.norm(normal)
+
+            # Compute perpendicular distances to the plane
+            distances = np.abs(np.dot(centered, normal))
+            
+            # Calculate mean and standard deviation
+            mean_dist = np.mean(distances)
+            std_dist = np.std(distances)
+            
+            # Filter distances for 1σ, 3σ, 6σ
+            sigma_ranges = [(1, "1σ"), (3, "3σ"), (6, "6σ")]
+            for sigma, sigma_label in sigma_ranges:
+                threshold = mean_dist + sigma * std_dist
+                valid_distances = distances[distances <= threshold]
+                if len(valid_distances) == 0:
+                    self.report({'WARNING'}, f"No vertices within {sigma_label} for '{vg_name}', skipping")
+                    continue
+                flatness = np.max(valid_distances) - np.min(valid_distances) if len(valid_distances) > 1 else 0.0
+                self.report({'INFO'}, f"Flatness ({sigma_label}) for '{vg_name}': {flatness:.6f} mm ({len(valid_distances)} vertices)")
+
+        self.report({'INFO'}, f"Flatness calculation completed in {time.time() - t:.3f} seconds")
+        return {'FINISHED'}
 
 class WORKPIECE_PT_MainPanel(Panel):
     bl_label = "Workpiece Processor"
@@ -354,6 +462,16 @@ class WORKPIECE_PT_MainPanel(Panel):
         row = layout.row(align=True)
         row.prop(context.scene, "angle_deviation_pc3", text="", slider=True, placeholder="Set allowed angle deviations between PC3 and +Z face normals for alignment")
         row.prop(context.scene, "angle_deviation_pc2", text="", slider=True, placeholder="Set allowed angle deviations between PC2 and +Y face normals for alignment")
+ 
         row.prop(context.scene, "angle_deviation_pc1", text="", slider=True, placeholder="Set allowed angle deviations between PC1 and +X face normals for alignment")
-        layout.separator()
         layout.operator("workpiece.alignment", text="Align Workpiece")
+        layout.separator()
+        layout.label(text="Flatness Calculation")
+        layout.prop(context.scene, "flatness_max_vertices", text="Max Vertices")
+        layout.prop(context.scene, "flatness_top", text="Top")
+        layout.prop(context.scene, "flatness_bottom", text="Bottom")
+        layout.prop(context.scene, "flatness_front", text="Front")
+        layout.prop(context.scene, "flatness_back", text="Back")
+        layout.prop(context.scene, "flatness_right", text="Right")
+        layout.prop(context.scene, "flatness_left", text="Left")
+        layout.operator("workpiece.flatness", text="Calculate Flatness")

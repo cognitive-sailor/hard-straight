@@ -2,12 +2,14 @@ import bpy
 from .hard_straight import (
     WORKPIECE_OT_ImportSTL,
     WORKPIECE_OT_Alignment,
+    WORKPIECE_OT_Flatness,
     WORKPIECE_PT_MainPanel
 )
 
 def register():
     bpy.utils.register_class(WORKPIECE_OT_ImportSTL)
     bpy.utils.register_class(WORKPIECE_OT_Alignment)
+    bpy.utils.register_class(WORKPIECE_OT_Flatness)
     bpy.utils.register_class(WORKPIECE_PT_MainPanel)
     
     # Register properties for the scene
@@ -51,10 +53,47 @@ def register():
         max=90.0,
         precision=2
     )
+    bpy.types.Scene.flatness_top = bpy.props.BoolProperty(
+        name="Top",
+        description="Calculate flatness for top vertex group",
+        default=False
+    )
+    bpy.types.Scene.flatness_bottom = bpy.props.BoolProperty(
+        name="Bottom",
+        description="Calculate flatness for bottom vertex group",
+        default=False
+    )
+    bpy.types.Scene.flatness_front = bpy.props.BoolProperty(
+        name="Front",
+        description="Calculate flatness for front vertex group",
+        default=False
+    )
+    bpy.types.Scene.flatness_back = bpy.props.BoolProperty(
+        name="Back",
+        description="Calculate flatness for back vertex group",
+        default=False
+    )
+    bpy.types.Scene.flatness_right = bpy.props.BoolProperty(
+        name="Right",
+        description="Calculate flatness for right vertex group",
+        default=False
+    )
+    bpy.types.Scene.flatness_left = bpy.props.BoolProperty(
+        name="Left",
+        description="Calculate flatness for left vertex group",
+        default=False
+    )
+    bpy.types.Scene.flatness_max_vertices = bpy.props.IntProperty(
+        name="Max Vertices for Flatness",
+        description="Maximum number of vertices to sample for flatness calculation (0 for all)",
+        default=10000,
+        min=0
+    )
 
 def unregister():
     bpy.utils.unregister_class(WORKPIECE_OT_ImportSTL)
     bpy.utils.unregister_class(WORKPIECE_OT_Alignment)
+    bpy.utils.unregister_class(WORKPIECE_OT_Flatness)
     bpy.utils.unregister_class(WORKPIECE_PT_MainPanel)
     
     # Unregister properties from the scene
@@ -63,6 +102,13 @@ def unregister():
     del bpy.types.Scene.angle_deviation_pc3
     del bpy.types.Scene.angle_deviation_pc2
     del bpy.types.Scene.angle_deviation_pc1
+    del bpy.types.Scene.flatness_top
+    del bpy.types.Scene.flatness_bottom
+    del bpy.types.Scene.flatness_front
+    del bpy.types.Scene.flatness_back
+    del bpy.types.Scene.flatness_right
+    del bpy.types.Scene.flatness_left
+    del bpy.types.Scene.flatness_max_vertices
 
 if __name__ == "__main__":
     register()
