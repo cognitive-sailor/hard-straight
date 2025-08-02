@@ -3,11 +3,12 @@ import numpy as np
 import scipy
 import os
 import mathutils
-from mathutils import Vector, Matrix, Quaternion, Euler
+from mathutils import Vector, Matrix
 import math
 from pathlib import Path
-from bpy.types import Operator, Panel, Menu
+from bpy.types import Operator, Panel
 import time
+
 
 class WORKPIECE_OT_ImportSTL(Operator):
     bl_idname = "workpiece.import_stl"
@@ -47,7 +48,7 @@ class WORKPIECE_OT_ImportSTL(Operator):
 
         self.report({'INFO'}, f"Imported {obj.name} in {time.time() - t:.3f} seconds")
         return {'FINISHED'}
-    
+
 class WORKPIECE_OT_Alignment(Operator):
     bl_idname = "workpiece.alignment"
     bl_label = "Align Workpiece"
@@ -103,14 +104,13 @@ class WORKPIECE_OT_Alignment(Operator):
                 self.report({'ERROR'}, "Mesh is degenerate (e.g., flat). PCA alignment not possible.")
                 return {'CANCELLED'}
             
-            # Step 2: Count faces aligned with PC3 and -PC3 (95% accuracy, ~5.74 degrees)
+            # Step 2: Count faces aligned with PC3 and -PC3
             pc3 = eigenvectors[:, 2]  # Third principal component
-            cos_95_percent = np.cos(np.deg2rad(5.74))  # Cosine of 5.74 degrees
+            cos_95_percent = np.cos(np.deg2rad(context.scene.angle_deviation_pc3))  # Use user-defined angle
             face_normals = np.array([obj.matrix_world @ f.normal for f in mesh.polygons])
             norm_pc3 = pc3 / np.linalg.norm(pc3)
             dots_pc3 = np.dot(face_normals, norm_pc3)
             dots_neg_pc3 = np.dot(face_normals, -norm_pc3)
-            # Identify faces aligned with +PC3 and -PC3
             pc3_pos_faces = np.where(dots_pc3 >= cos_95_percent)[0]
             pc3_neg_faces = np.where(dots_neg_pc3 >= cos_95_percent)[0]
             count_pc3 = len(pc3_pos_faces)
@@ -119,17 +119,15 @@ class WORKPIECE_OT_Alignment(Operator):
                 norm_pc3 = -norm_pc3
                 dots_pc3 = np.dot(face_normals, norm_pc3)
                 dots_neg_pc3 = np.dot(face_normals, -norm_pc3)
-                # Identify faces aligned with +PC3 and -PC3
                 pc3_pos_faces = np.where(dots_pc3 >= cos_95_percent)[0]
                 pc3_neg_faces = np.where(dots_neg_pc3 >= cos_95_percent)[0]
 
-            # Step 3: Count faces aligned with PC2 and -PC2 (70% accuracy, ~45.58 degrees)
+            # Step 3: Count faces aligned with PC2 and -PC2
             pc2 = eigenvectors[:, 1]  # Second principal component
-            cos_70_percent = np.cos(np.deg2rad(45.58))  # Cosine of 45.58 degrees
+            cos_70_percent = np.cos(np.deg2rad(context.scene.angle_deviation_pc2))  # Use user-defined angle
             norm_pc2 = pc2 / np.linalg.norm(pc2)
             dots_pc2 = np.dot(face_normals, norm_pc2)
             dots_neg_pc2 = np.dot(face_normals, -norm_pc2)
-            # Identify faces aligned with +PC2 and -PC2
             pc2_pos_faces = np.where(dots_pc2 >= cos_70_percent)[0]
             pc2_neg_faces = np.where(dots_neg_pc2 >= cos_70_percent)[0]
             count_pc2 = len(pc2_pos_faces)
@@ -138,7 +136,6 @@ class WORKPIECE_OT_Alignment(Operator):
                 norm_pc2 = -norm_pc2
                 dots_pc2 = np.dot(face_normals, norm_pc2)
                 dots_neg_pc2 = np.dot(face_normals, -norm_pc2)
-                # Identify faces aligned with +PC2 and -PC2
                 pc2_pos_faces = np.where(dots_pc2 >= cos_70_percent)[0]
                 pc2_neg_faces = np.where(dots_neg_pc2 >= cos_70_percent)[0]
 
@@ -151,7 +148,7 @@ class WORKPIECE_OT_Alignment(Operator):
             y_axis = y_axis / np.linalg.norm(y_axis)
 
             # Step 5: Identify faces aligned with +PC1 and -PC1
-            cos_80_percent = np.cos(np.deg2rad(45.58))  # Cosine of 45.58 degrees
+            cos_80_percent = np.cos(np.deg2rad(context.scene.angle_deviation_pc1))  # Use user-defined angle
             dots_pc1 = np.dot(face_normals, x_axis)
             dots_neg_pc1 = np.dot(face_normals, -x_axis)
             pc1_pos_faces = np.where(dots_pc1 >= cos_80_percent)[0]
@@ -173,11 +170,9 @@ class WORKPIECE_OT_Alignment(Operator):
                 self.report({'INFO'}, f"Sample face normals (first 3): {face_normals[:3]}")
 
             # Step 6: Create vertex groups for +PC3 and -PC3, +PC2 and -PC2, +PC1 and -PC1
-            # Remove existing vertex groups if they exist
             for vg_name in ["+PC3", "-PC3", "+PC2", "-PC2", "+PC1", "-PC1"]:
                 if vg_name in obj.vertex_groups:
                     obj.vertex_groups.remove(obj.vertex_groups[vg_name])
-            # Create new vertex groups
             vg_1 = obj.vertex_groups.new(name="+PC3")
             vg_2 = obj.vertex_groups.new(name="-PC3")
             vg_3 = obj.vertex_groups.new(name="+PC2")
@@ -185,41 +180,78 @@ class WORKPIECE_OT_Alignment(Operator):
             vg_5 = obj.vertex_groups.new(name="+PC1")
             vg_6 = obj.vertex_groups.new(name="-PC1")
             
-            # Assign vertices of +PC3 faces to +PC3 vertex group
             for face_idx in pc3_pos_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_1.add([vert_idx], 1.0, "REPLACE")
             
-            # Assign vertices of -PC3 faces to -PC3 vertex group
             for face_idx in pc3_neg_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_2.add([vert_idx], 1.0, "REPLACE")
 
-            # Assign vertices of +PC2 faces to +PC2 vertex group
             for face_idx in pc2_pos_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_3.add([vert_idx], 1.0, "REPLACE")
             
-            # Assign vertices of -PC2 faces to -PC2 vertex group
             for face_idx in pc2_neg_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_4.add([vert_idx], 1.0, "REPLACE")
             
-            # Assign vertices of +PC1 faces to +PC1 vertex group
             for face_idx in pc1_pos_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_5.add([vert_idx], 1.0, "REPLACE")
 
-            # Assign vertices of -PC1 faces to -PC1 vertex group
             for face_idx in pc1_neg_faces:
                 face = mesh.polygons[face_idx]
                 for vert_idx in face.vertices:
                     vg_6.add([vert_idx], 1.0, "REPLACE")
+
+            # Step 6.5: Create or assign materials for each vertex group
+            material_map = {
+                "Z": ("+PC3", pc3_pos_faces, (0.0, 0.0, 1.0)),  # Blue for top (+z_axis)
+                "-Z": ("-PC3", pc3_neg_faces, (0.05, 0.05, 0.2)),  # Dark blue for bottom (-z_axis)
+                "Y": ("+PC2", pc2_pos_faces, (0.0, 1.0, 0.0)),   # Green for front (+y_axis)
+                "-Y": ("-PC2", pc2_neg_faces, (0.05, 0.2, 0.05)),  # Dark green for back (-y_axis)
+                "X": ("+PC1", pc1_pos_faces, (1.0, 0.0, 0.0)),   # Red for right (+x_axis)
+                "-X": ("-PC1", pc1_neg_faces, (0.2, 0.05, 0.05))   # Dark red for left (-x_axis)
+            }
+
+            # Clear existing material slots
+            obj.data.materials.clear()
+
+            # Create and assign base grey material
+            base_material = bpy.data.materials.get("BaseGrey")
+            if not base_material:
+                base_material = bpy.data.materials.new(name="BaseGrey")
+                base_material.use_nodes = True
+                principled = base_material.node_tree.nodes.get("Principled BSDF")
+                if principled:
+                    principled.inputs["Base Color"].default_value = (0.1, 0.1, 0.1, 1.0)  # Grey RGB + Alpha
+            obj.data.materials.append(base_material)
+            # Assign base material to all faces
+            for face in mesh.polygons:
+                face.material_index = 0
+
+            # Create or get materials and add to mesh
+            for mat_name, (vg_name, face_indices, color) in material_map.items():
+                material = bpy.data.materials.get(mat_name)
+                if not material:
+                    # Create new material
+                    material = bpy.data.materials.new(name=mat_name)
+                    material.use_nodes = True
+                    principled = material.node_tree.nodes.get("Principled BSDF")
+                    if principled:
+                        principled.inputs["Base Color"].default_value = (*color, 1.0)  # RGB + Alpha
+                obj.data.materials.append(material)
+                # Assign material to faces
+                mat_index = obj.data.materials.find(mat_name)
+                for face_idx in face_indices:
+                    mesh.polygons[face_idx].material_index = mat_index
+                self.report({'INFO'}, f"Assigned material '{mat_name}' to {len(face_indices)} faces (vertex group '{vg_name}')")
 
             # Step 7: Construct rotation matrix to align current orientation to target (X, Y, Z)
             x_axis = np.cross(y_axis, z_axis)  # Compute PC1 (orthogonal to PC2 and PC3)
@@ -239,7 +271,7 @@ class WORKPIECE_OT_Alignment(Operator):
             # Compute rotation matrix: current_basis * rotation = target_basis
             rotation_matrix = current_basis.inverted() @ target_basis
             
-            # Convert to 4x4 for object transformation (no scaling or division)
+            # Convert to 4x4 for object transformation
             rotation_matrix = rotation_matrix.to_4x4()
             
             # Debug: Print rotation matrix and verify orthogonality
@@ -249,13 +281,12 @@ class WORKPIECE_OT_Alignment(Operator):
             is_orthogonal = np.allclose(np.dot(rotation_matrix.to_3x3(), rotation_matrix.to_3x3().transposed()), np.eye(3), atol=1e-6)
             self.report({'INFO'}, f"Rotation Matrix Orthogonal: {is_orthogonal}")
 
-            # Apply only rotation (no translation)
+            # Apply only rotation
             obj.matrix_world = rotation_matrix @ Matrix.Translation(obj.matrix_world.translation)
-            bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
+            bpy.ops.object.select_all(action='DESELECT')
             obj.select_set(True)
-            bpy.context.view_layer.objects.active = obj  # Set active object
+            bpy.context.view_layer.objects.active = obj
             bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-
 
             # Step 8: Find vertices with minimum x, y, z coordinates and translate mesh
             vertices_world = [obj.matrix_world @ v.co for v in mesh.vertices]
@@ -297,46 +328,6 @@ class WORKPIECE_OT_Alignment(Operator):
         self.report({'INFO'}, f"Alignment operation executed in {time.time() - t:.3f} seconds")
         return {'FINISHED'}
 
-class WORKPIECE_OT_AlignmentInvert(Operator):
-    bl_idname = "workpiece.alignment_invert"
-    bl_label = "Invert Alignment Axis"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Invert the alignment axis of the workpiece"
-
-    def execute(self, context):
-        obj = bpy.context.active_object
-        if not obj or obj.type != 'MESH':
-            self.report({'ERROR'}, "No active mesh object found")
-            return {'CANCELLED'}
-
-        # Invert alignment axis
-        t = time.time()  # start timer
-
-        # Set origin: geometry to origin
-        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='MEDIAN')
-
-        invert_axis = None
-        if context.scene.invert_X:
-            obj.rotation_euler.x += math.pi  # Rotate 180 degrees around X axis
-            invert_axis = 'X'
-        if context.scene.invert_Y:
-            obj.rotation_euler.y += math.pi  # Rotate 180 degrees around Y axis
-            invert_axis = 'Y'
-        if context.scene.invert_Z:
-            obj.rotation_euler.z += math.pi  # Rotate 180 degrees around Z axis
-            invert_axis = 'Z'
-        if not invert_axis:
-            self.report({'ERROR'}, "No axis selected for inversion")
-            return {'CANCELLED'}
-        
-        # Apply the rotation
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
-        
-        self.report({'INFO'}, f"Alignment axis inverted along {invert_axis} in {time.time() - t:.3f} seconds")
-        return {'FINISHED'}
-
-
-
 class WORKPIECE_PT_MainPanel(Panel):
     bl_label = "Workpiece Processor"
     bl_idname = "WORKPIECE_PT_MainPanel"
@@ -352,11 +343,17 @@ class WORKPIECE_PT_MainPanel(Panel):
         layout.separator()
         layout.label(text="Canonical Alignment")
         layout.prop(context.scene, "alignment_mode", text="Mode")
+        layout.label(text="Angle Deviations (degrees)")
+        row = layout.row(align=True)
+        c1 = row.column(align=True)
+        c1.label(text="PC3: Z")
+        c2 = row.column(align=True)
+        c2.label(text="PC2: Y")
+        c3 = row.column(align=True)
+        c3.label(text="PC1: X")
+        row = layout.row(align=True)
+        row.prop(context.scene, "angle_deviation_pc3", text="", slider=True, placeholder="Set allowed angle deviations between PC3 and +Z face normals for alignment")
+        row.prop(context.scene, "angle_deviation_pc2", text="", slider=True, placeholder="Set allowed angle deviations between PC2 and +Y face normals for alignment")
+        row.prop(context.scene, "angle_deviation_pc1", text="", slider=True, placeholder="Set allowed angle deviations between PC1 and +X face normals for alignment")
+        layout.separator()
         layout.operator("workpiece.alignment", text="Align Workpiece")
-        layout.label(text="Rotate by 180° About Axis")
-        layout.row(align=True)
-        layout.prop(context.scene, "invert_X", text="X")
-        layout.prop(context.scene, "invert_Y", text="Y")
-        layout.prop(context.scene, "invert_Z", text="Z")
-        layout.row(align=True)
-        layout.operator("workpiece.alignment_invert", text="Invert axis", icon='ARROW_LEFTRIGHT')
