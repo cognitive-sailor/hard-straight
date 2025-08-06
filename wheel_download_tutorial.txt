@@ -3,9 +3,9 @@ pip download numpy --dest ./lib/linux --only-binary=:all: --python-version=3.11 
 
 # 1.b Download all python packages as .whl files using one command for every platform
 # You have to check which python package versions work together (and are compatible with python version that Blender uses)
-pip download numpy==1.26.4 scipy==1.11.3 --python-version 3.11 --platform win_amd64 --no-deps -d my_addon/lib/windows/
-pip download numpy==1.26.4 scipy==1.11.3 --python-version 3.11 --platform macosx_11_0_arm64 --no-deps -d my_addon/lib/macos/
-pip download numpy==1.26.4 scipy==1.11.3 --python-version 3.11 --platform manylinux_2_17_x86_64 --no-deps -d my_addon/lib/linux/
+pip download numpy==1.26.4 scipy==1.11.3 --python-version 3.11 --only-binary=:all: --platform win_amd64 --no-deps -d ./lib/windows/
+pip download numpy==1.26.4 scipy==1.11.3 --python-version 3.11 --only-binary=:all: --platform macosx_11_0_arm64 --no-deps -d ./lib/macos/
+pip download numpy==1.26.4 scipy==1.11.3 --python-version 3.11 --only-binary=:all: --platform manylinux_2_17_x86_64 --no-deps -d ./lib/linux/
 
 # 2. Set the --dest to the location of where you want to store .whl files (platform-dependent), and make the Blender aware of this by updating the blender_manifest.toml file
 

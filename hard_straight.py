@@ -1,6 +1,6 @@
 import bpy
 import numpy as np
-import scipy
+#import scipy
 import os
 import mathutils
 from mathutils import Vector, Matrix
@@ -462,7 +462,6 @@ class WORKPIECE_PT_MainPanel(Panel):
         row = layout.row(align=True)
         row.prop(context.scene, "angle_deviation_pc3", text="", slider=True, placeholder="Set allowed angle deviations between PC3 and +Z face normals for alignment")
         row.prop(context.scene, "angle_deviation_pc2", text="", slider=True, placeholder="Set allowed angle deviations between PC2 and +Y face normals for alignment")
- 
         row.prop(context.scene, "angle_deviation_pc1", text="", slider=True, placeholder="Set allowed angle deviations between PC1 and +X face normals for alignment")
         layout.operator("workpiece.alignment", text="Align Workpiece")
         layout.separator()
