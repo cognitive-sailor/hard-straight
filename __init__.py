@@ -3,6 +3,7 @@ from .hard_straight import (
     WORKPIECE_OT_ImportSTL,
     WORKPIECE_OT_Alignment,
     WORKPIECE_OT_Flatness,
+    WORKPIECE_OT_Batch,
     WORKPIECE_PT_MainPanel
 )
 
@@ -10,6 +11,7 @@ def register():
     bpy.utils.register_class(WORKPIECE_OT_ImportSTL)
     bpy.utils.register_class(WORKPIECE_OT_Alignment)
     bpy.utils.register_class(WORKPIECE_OT_Flatness)
+    bpy.utils.register_class(WORKPIECE_OT_Batch)
     bpy.utils.register_class(WORKPIECE_PT_MainPanel)
     
     # Register properties for the scene
@@ -56,44 +58,63 @@ def register():
     bpy.types.Scene.flatness_top = bpy.props.BoolProperty(
         name="Top",
         description="Calculate flatness for top vertex group",
-        default=False
+        default=True
     )
     bpy.types.Scene.flatness_bottom = bpy.props.BoolProperty(
         name="Bottom",
         description="Calculate flatness for bottom vertex group",
-        default=False
+        default=True
     )
     bpy.types.Scene.flatness_front = bpy.props.BoolProperty(
         name="Front",
         description="Calculate flatness for front vertex group",
-        default=False
+        default=True
     )
     bpy.types.Scene.flatness_back = bpy.props.BoolProperty(
         name="Back",
         description="Calculate flatness for back vertex group",
-        default=False
+        default=True
     )
     bpy.types.Scene.flatness_right = bpy.props.BoolProperty(
         name="Right",
         description="Calculate flatness for right vertex group",
-        default=False
+        default=True
     )
     bpy.types.Scene.flatness_left = bpy.props.BoolProperty(
         name="Left",
         description="Calculate flatness for left vertex group",
-        default=False
+        default=True
     )
     bpy.types.Scene.flatness_max_vertices = bpy.props.IntProperty(
         name="Max Vertices for Flatness",
         description="Maximum number of vertices to sample for flatness calculation (0 for all)",
-        default=10000,
+        default=0,
         min=0
+    )
+
+    # Batch processing
+    bpy.types.Scene.stl_directory = bpy.props.StringProperty(
+        name="STL Directory",
+        description="Directory containing STL files",
+        subtype='DIR_PATH',
+        default=""
+    )
+    bpy.types.Scene.canonical_alignment = bpy.props.BoolProperty(
+        name="Canonical Alignment",
+        description="Include Canonical Alignment?",
+        default=True
+    )
+    bpy.types.Scene.flatness_calculation = bpy.props.BoolProperty(
+        name="Flatness Calculation",
+        description="Include Flatness Calculation?",
+        default=True
     )
 
 def unregister():
     bpy.utils.unregister_class(WORKPIECE_OT_ImportSTL)
     bpy.utils.unregister_class(WORKPIECE_OT_Alignment)
     bpy.utils.unregister_class(WORKPIECE_OT_Flatness)
+    bpy.utils.unregister_class(WORKPIECE_OT_Batch)
     bpy.utils.unregister_class(WORKPIECE_PT_MainPanel)
     
     # Unregister properties from the scene
@@ -109,6 +130,10 @@ def unregister():
     del bpy.types.Scene.flatness_right
     del bpy.types.Scene.flatness_left
     del bpy.types.Scene.flatness_max_vertices
+
+    del bpy.types.Scene.stl_directory
+    del bpy.types.Scene.canonical_alignment
+    del bpy.types.Scene.flatness_calculation
 
 if __name__ == "__main__":
     register()

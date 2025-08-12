@@ -1,6 +1,5 @@
 import bpy
 import numpy as np
-#import scipy
 import os
 import mathutils
 from mathutils import Vector, Matrix
@@ -9,6 +8,7 @@ from pathlib import Path
 from bpy.types import Operator, Panel
 import time
 import random
+import csv
 
 
 class WORKPIECE_OT_ImportSTL(Operator):
@@ -31,9 +31,6 @@ class WORKPIECE_OT_ImportSTL(Operator):
         if not stl_file or not (stl_file.endswith('.stl') or stl_file.endswith('.STL')):
             self.report({'ERROR'}, "Please select a valid STL file")
             return {'CANCELLED'}
-        
-        bpy.ops.object.select_all(action='SELECT')
-        bpy.ops.object.delete()
 
         t = time.time() # start timer
 
@@ -182,6 +179,7 @@ class WORKPIECE_OT_Alignment(Operator):
             for vg_name in vertex_coords.keys():
                 if vg_name in obj.vertex_groups:
                     obj.vertex_groups.remove(obj.vertex_groups[vg_name])
+
             vg_1 = obj.vertex_groups.new(name="top")
             vg_2 = obj.vertex_groups.new(name="bottom")
             vg_3 = obj.vertex_groups.new(name="front")
@@ -367,12 +365,12 @@ class WORKPIECE_OT_Flatness(Operator):
 
         # Map vertex group names to tick box properties
         vg_map = {
-            "top": context.scene.flatness_top,
-            "bottom": context.scene.flatness_bottom,
-            "front": context.scene.flatness_front,
-            "back": context.scene.flatness_back,
+            "left": context.scene.flatness_left,
             "right": context.scene.flatness_right,
-            "left": context.scene.flatness_left
+            "back": context.scene.flatness_back,
+            "front": context.scene.flatness_front,
+            "bottom": context.scene.flatness_bottom,
+            "top": context.scene.flatness_top
         }
 
         selected_vgs = [vg_name for vg_name, enabled in vg_map.items() if enabled]
@@ -381,6 +379,8 @@ class WORKPIECE_OT_Flatness(Operator):
             return {'CANCELLED'}
 
         max_vertices = context.scene.flatness_max_vertices
+        row = {'Workpiece':obj.name}
+        flatness_data = []
         for vg_name in selected_vgs:
             if vg_name not in obj.vertex_groups:
                 self.report({'WARNING'}, f"Vertex group '{vg_name}' not found, skipping")
@@ -409,10 +409,12 @@ class WORKPIECE_OT_Flatness(Operator):
                 self.report({'INFO'}, f"Sampled {max_vertices} vertices from '{vg_name}' (total: {num_vertices})")
 
             # Fit plane using PCA (SVD)
+            self.report({'INFO'}, f"Plane fitting start. Vetrices:\n{vertices.shape}, size={vertices.nbytes/1e6} MB")
             centroid = np.mean(vertices, axis=0)
             centered = vertices - centroid
-            _, _, vh = np.linalg.svd(centered)
-            normal = vh[2, :]  # Third singular vector (least variance) is plane normal
+            # _, _, vh = np.linalg.svd(centered, full_matrices=False)
+            # normal = vh[2, :]  # Third singular vector (least variance) is plane normal
+            normal = np.linalg.eigh(centered.T @ centered)[1][:, 0]
             normal = normal / np.linalg.norm(normal)
 
             # Compute perpendicular distances to the plane
@@ -423,7 +425,7 @@ class WORKPIECE_OT_Flatness(Operator):
             std_dist = np.std(distances)
             
             # Filter distances for 1σ, 3σ, 6σ
-            sigma_ranges = [(1, "1σ"), (3, "3σ"), (6, "6σ")]
+            sigma_ranges = [(1, "1-Sigma"), (3, "3-Sigma"), (6, "6-Sigma")]
             for sigma, sigma_label in sigma_ranges:
                 threshold = mean_dist + sigma * std_dist
                 valid_distances = distances[distances <= threshold]
@@ -431,9 +433,53 @@ class WORKPIECE_OT_Flatness(Operator):
                     self.report({'WARNING'}, f"No vertices within {sigma_label} for '{vg_name}', skipping")
                     continue
                 flatness = np.max(valid_distances) - np.min(valid_distances) if len(valid_distances) > 1 else 0.0
+                row.update({vg_name+"_"+sigma_label:flatness})
                 self.report({'INFO'}, f"Flatness ({sigma_label}) for '{vg_name}': {flatness:.6f} mm ({len(valid_distances)} vertices)")
-
+            
+        flatness_data.append(row)
+        save_directory = os.path.dirname(bpy.context.scene.stl_file)
+        save_directory = os.path.join(save_directory, "flatness.csv")
+        self.report({'INFO'}, f"Save directory: {save_directory}")
+        self.report({'INFO'}, f"Flatnes_data keys: {flatness_data[0].keys()}")
+        file_has_lines = False
+        if os.path.exists(save_directory):
+            with open(save_directory, "r", encoding="utf-8") as f:
+                file_has_lines = bool(f.readline().strip())
+        with open(save_directory, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=flatness_data[0].keys())
+            if not file_has_lines: # if file has no lines
+                writer.writeheader()
+            writer.writerows(flatness_data)
         self.report({'INFO'}, f"Flatness calculation completed in {time.time() - t:.3f} seconds")
+        return {'FINISHED'}
+    
+class WORKPIECE_OT_Batch(Operator):
+    bl_idname = "workpiece.batch_process"
+    bl_label = "Batch Processing"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Batch process every .stl file from the selected folder"
+
+    def execute(self, context):
+        self.report({'INFO'}, f"Started Batch Processing")
+        input_directory = Path(context.scene.stl_directory)
+        self.report({'INFO'}, f"Directory for batch processing: {input_directory}")
+        stl_files = os.listdir(input_directory)
+        for file in stl_files:
+            # 1. Import a STL file
+            bpy.ops.object.select_all(action='SELECT')
+            bpy.ops.object.delete()
+            context.scene.stl_file = os.path.join(input_directory,file) # set a file to inport
+            bpy.ops.workpiece.import_stl()
+            # 2. Canonical Alignment - AUTO
+            bpy.ops.workpiece.alignment()
+            # 3. Flatness calculation
+            # context.scene.flatness_left = True
+            # context.scene.flatness_right = True
+            # context.scene.flatness_back = True
+            # context.scene.flatness_front = True
+            # context.scene.flatness_bottom = True
+            # context.scene.flatness_top = True
+            bpy.ops.workpiece.flatness()
         return {'FINISHED'}
 
 class WORKPIECE_PT_MainPanel(Panel):
@@ -446,31 +492,41 @@ class WORKPIECE_PT_MainPanel(Panel):
     def draw(self, context):
         layout = self.layout
         layout.label(text="Step-by-Step Processing")
-        layout.prop(context.scene, "stl_file")
-        layout.operator("workpiece.import_stl", text="Import STL")
-        layout.separator()
-        layout.label(text="Canonical Alignment")
-        layout.prop(context.scene, "alignment_mode", text="Mode")
-        layout.label(text="Angle Deviations (degrees)")
-        row = layout.row(align=True)
+        step_box = layout.box()
+        step_box.prop(context.scene, "stl_file")
+        step_box.operator("workpiece.import_stl", text="Import STL")
+        step_box.separator()
+        step_box.label(text="Canonical Alignment")
+        step_box.prop(context.scene, "alignment_mode", text="Mode")
+        step_box.label(text="Angle Deviations (degrees)")
+        row = step_box.row(align=True)
         c1 = row.column(align=True)
         c1.label(text="PC3: Z")
         c2 = row.column(align=True)
         c2.label(text="PC2: Y")
         c3 = row.column(align=True)
         c3.label(text="PC1: X")
-        row = layout.row(align=True)
+        row = step_box.row(align=True)
         row.prop(context.scene, "angle_deviation_pc3", text="", slider=True, placeholder="Set allowed angle deviations between PC3 and +Z face normals for alignment")
         row.prop(context.scene, "angle_deviation_pc2", text="", slider=True, placeholder="Set allowed angle deviations between PC2 and +Y face normals for alignment")
         row.prop(context.scene, "angle_deviation_pc1", text="", slider=True, placeholder="Set allowed angle deviations between PC1 and +X face normals for alignment")
-        layout.operator("workpiece.alignment", text="Align Workpiece")
+        step_box.operator("workpiece.alignment", text="Align Workpiece")
+        step_box.separator()
+        step_box.label(text="Flatness Calculation")
+        step_box.prop(context.scene, "flatness_max_vertices", text="Max Vertices")
+        flatnes_choices = step_box.grid_flow(row_major=True, columns=2)
+        flatnes_choices.prop(context.scene, "flatness_left", text="Left")
+        flatnes_choices.prop(context.scene, "flatness_right", text="Right")
+        flatnes_choices.prop(context.scene, "flatness_back", text="Back")
+        flatnes_choices.prop(context.scene, "flatness_front", text="Front")
+        flatnes_choices.prop(context.scene, "flatness_bottom", text="Bottom")
+        flatnes_choices.prop(context.scene, "flatness_top", text="Top")
+        step_box.operator("workpiece.flatness", text="Calculate Flatness")
         layout.separator()
-        layout.label(text="Flatness Calculation")
-        layout.prop(context.scene, "flatness_max_vertices", text="Max Vertices")
-        layout.prop(context.scene, "flatness_top", text="Top")
-        layout.prop(context.scene, "flatness_bottom", text="Bottom")
-        layout.prop(context.scene, "flatness_front", text="Front")
-        layout.prop(context.scene, "flatness_back", text="Back")
-        layout.prop(context.scene, "flatness_right", text="Right")
-        layout.prop(context.scene, "flatness_left", text="Left")
-        layout.operator("workpiece.flatness", text="Calculate Flatness")
+        layout.label(text="Batch Processing")
+        batch_box = layout.box()
+        batch_box.prop(context.scene, "stl_directory")
+        batch_box.label(text="Select Operations")
+        batch_box.prop(context.scene, "canonical_alignment", text="Canonical Alignment")
+        batch_box.prop(context.scene, "flatness_calculation", text="Flatness Calculation")
+        layout.operator("workpiece.batch_process", text="Start Batch Processing")
