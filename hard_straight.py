@@ -8,7 +8,7 @@ from pathlib import Path
 from bpy.types import Operator, Panel
 import time
 import random
-import csv
+import csv 
 
 
 class WORKPIECE_OT_ImportSTL(Operator):
@@ -34,15 +34,18 @@ class WORKPIECE_OT_ImportSTL(Operator):
 
         t = time.time() # start timer
 
+        for mesh in bpy.data.meshes:
+            bpy.data.meshes.remove(mesh)
+
         try:
             bpy.ops.wm.stl_import(filepath=stl_file)
         except Exception as e:
             self.report({'ERROR'}, f"Failed to import STL: {e}")
             return {'CANCELLED'}
         
-        obj = bpy.context.selected_objects[0]
+        obj = bpy.data.objects[0] # bpy.context.selected_objects[0]
         obj.name = os.path.basename(stl_file)[:-4]
-        mesh = obj.data
+        bpy.types.Scene.stl_mesh = bpy.data.objects[0]
 
         self.report({'INFO'}, f"Imported {obj.name} in {time.time() - t:.3f} seconds")
         return {'FINISHED'}

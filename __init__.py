@@ -6,6 +6,12 @@ from .hard_straight import (
     WORKPIECE_OT_Batch,
     WORKPIECE_PT_MainPanel
 )
+from .strike_planner import (
+    StrikeSettings,
+    StrikePropertyGroup,
+    GenerateStrikesOperator,
+    STRIKEGEN_PT_MainPanel
+)
 
 def register():
     bpy.utils.register_class(WORKPIECE_OT_ImportSTL)
@@ -13,6 +19,10 @@ def register():
     bpy.utils.register_class(WORKPIECE_OT_Flatness)
     bpy.utils.register_class(WORKPIECE_OT_Batch)
     bpy.utils.register_class(WORKPIECE_PT_MainPanel)
+    bpy.utils.register_class(STRIKEGEN_PT_MainPanel)
+    bpy.utils.register_class(StrikeSettings)
+    bpy.utils.register_class(StrikePropertyGroup)
+    bpy.utils.register_class(GenerateStrikesOperator)
     
     # Register properties for the scene
     # These properties will be used to store user inputs for the workpiece processing
@@ -91,6 +101,7 @@ def register():
         default=0,
         min=0
     )
+    bpy.types.Scene.stl_mesh = bpy.props.PointerProperty(type=bpy.types.Object, name='stl_mesh', description='The main .STL mesh for processing')
 
     # Batch processing
     bpy.types.Scene.stl_directory = bpy.props.StringProperty(
@@ -110,12 +121,20 @@ def register():
         default=True
     )
 
+    # Strike Generator
+    bpy.types.Scene.StrikeSettings = bpy.props.PointerProperty(type=StrikeSettings)
+    bpy.types.Mesh.Strikes = bpy.props.CollectionProperty(type=StrikePropertyGroup)
+
 def unregister():
     bpy.utils.unregister_class(WORKPIECE_OT_ImportSTL)
     bpy.utils.unregister_class(WORKPIECE_OT_Alignment)
     bpy.utils.unregister_class(WORKPIECE_OT_Flatness)
     bpy.utils.unregister_class(WORKPIECE_OT_Batch)
     bpy.utils.unregister_class(WORKPIECE_PT_MainPanel)
+    bpy.utils.unregister_class(STRIKEGEN_PT_MainPanel)
+    bpy.utils.unregister_class(StrikeSettings)
+    bpy.utils.unregister_class(StrikePropertyGroup)
+    bpy.utils.unregister_class(GenerateStrikesOperator)
     
     # Unregister properties from the scene
     del bpy.types.Scene.stl_file
@@ -130,10 +149,14 @@ def unregister():
     del bpy.types.Scene.flatness_right
     del bpy.types.Scene.flatness_left
     del bpy.types.Scene.flatness_max_vertices
+    del bpy.types.Scene.stl_mesh
 
     del bpy.types.Scene.stl_directory
     del bpy.types.Scene.canonical_alignment
     del bpy.types.Scene.flatness_calculation
+
+    del bpy.types.Mesh.StrikeSettings
+    del bpy.types.Mesh.Strikes
 
 if __name__ == "__main__":
     register()
