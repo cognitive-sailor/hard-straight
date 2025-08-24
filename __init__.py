@@ -7,9 +7,10 @@ from .hard_straight import (
     WORKPIECE_PT_MainPanel
 )
 from .strike_planner import (
-    StrikeSettings,
-    StrikePropertyGroup,
-    GenerateStrikesOperator,
+    STRIKEGEN_PT_StrikeSettings,
+    STRIKEGEN_PT_StrikePropertyGroup,
+    STRIKEGEN_OT_GenerateStrikes,
+    STRIKEGEN_OT_WriteStrikesCSV,
     STRIKEGEN_PT_MainPanel
 )
 
@@ -20,9 +21,10 @@ def register():
     bpy.utils.register_class(WORKPIECE_OT_Batch)
     bpy.utils.register_class(WORKPIECE_PT_MainPanel)
     bpy.utils.register_class(STRIKEGEN_PT_MainPanel)
-    bpy.utils.register_class(StrikeSettings)
-    bpy.utils.register_class(StrikePropertyGroup)
-    bpy.utils.register_class(GenerateStrikesOperator)
+    bpy.utils.register_class(STRIKEGEN_PT_StrikeSettings)
+    bpy.utils.register_class(STRIKEGEN_PT_StrikePropertyGroup)
+    bpy.utils.register_class(STRIKEGEN_OT_GenerateStrikes)
+    bpy.utils.register_class(STRIKEGEN_OT_WriteStrikesCSV)
     
     # Register properties for the scene
     # These properties will be used to store user inputs for the workpiece processing
@@ -122,8 +124,8 @@ def register():
     )
 
     # Strike Generator
-    bpy.types.Scene.StrikeSettings = bpy.props.PointerProperty(type=StrikeSettings)
-    bpy.types.Mesh.Strikes = bpy.props.CollectionProperty(type=StrikePropertyGroup)
+    bpy.types.Scene.StrikeSettings = bpy.props.PointerProperty(type=STRIKEGEN_PT_StrikeSettings)
+    bpy.types.Mesh.Strikes = bpy.props.CollectionProperty(type=STRIKEGEN_PT_StrikePropertyGroup)
 
 def unregister():
     bpy.utils.unregister_class(WORKPIECE_OT_ImportSTL)
@@ -132,9 +134,10 @@ def unregister():
     bpy.utils.unregister_class(WORKPIECE_OT_Batch)
     bpy.utils.unregister_class(WORKPIECE_PT_MainPanel)
     bpy.utils.unregister_class(STRIKEGEN_PT_MainPanel)
-    bpy.utils.unregister_class(StrikeSettings)
-    bpy.utils.unregister_class(StrikePropertyGroup)
-    bpy.utils.unregister_class(GenerateStrikesOperator)
+    bpy.utils.unregister_class(STRIKEGEN_PT_StrikeSettings)
+    bpy.utils.unregister_class(STRIKEGEN_PT_StrikePropertyGroup)
+    bpy.utils.unregister_class(STRIKEGEN_OT_GenerateStrikes)
+    bpy.utils.unregister_class(STRIKEGEN_OT_WriteStrikesCSV)
     
     # Unregister properties from the scene
     del bpy.types.Scene.stl_file
@@ -155,7 +158,7 @@ def unregister():
     del bpy.types.Scene.canonical_alignment
     del bpy.types.Scene.flatness_calculation
 
-    del bpy.types.Mesh.StrikeSettings
+    del bpy.types.Scene.StrikeSettings
     del bpy.types.Mesh.Strikes
 
 if __name__ == "__main__":

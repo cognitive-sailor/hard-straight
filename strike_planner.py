@@ -1,19 +1,28 @@
 import bpy
 import numpy as np
-from bpy.types import Operator, Panel
+from bpy.types import Operator, Panel, PropertyGroup
 import math
 import random
+import csv
+import os
 
-class StrikeSettings(bpy.types.PropertyGroup):
-    strike_length: bpy.props.IntProperty(default = 15, min=1, max=30)
+class STRIKEGEN_PT_StrikeSettings(PropertyGroup):
+    strike_length: bpy.props.IntProperty(default = 14, min=1, max=30)
     strike_width: bpy.props.IntProperty(default = 2, min=1, max=10)
     x_edge_padding: bpy.props.IntProperty(default=1, min=0, max=10)
     y_edge_padding: bpy.props.IntProperty(default=1, min=0, max=10)
     inter_distance: bpy.props.FloatProperty(default=1, min=0, max=10)
     number_of_strikes: bpy.props.IntProperty(default=56, min=0, max=100)
+    strike_export_dir: bpy.props.StringProperty(
+        name="Export Dir",
+        description="Select destination directory for CSV file containing strike data",
+        subtype="DIR_PATH",
+        default=""
+    )
+    process_all_files: bpy.props.BoolProperty(default=False)
 
 # Define the custom Strike item as a PropertyGroup
-class StrikePropertyGroup(bpy.types.PropertyGroup):
+class STRIKEGEN_PT_StrikePropertyGroup(PropertyGroup):
     ID: bpy.props.IntProperty(
         name="ID",
         description="Strike ID number, sequential strike.",
@@ -48,21 +57,42 @@ class StrikePropertyGroup(bpy.types.PropertyGroup):
         max=180
     )
 
-class GenerateStrikesOperator(bpy.types.Operator):
-    bl_idname = "mesh.generate_strikes"  # Unique ID (prefix with 'mesh.' for convention)
-    bl_label = "Generate 5 Strikes"
-    bl_description = "Adds 5 example strikes to the active mesh's strikes collection"
+class STRIKEGEN_OT_GenerateStrikes(Operator):
+    bl_idname = "workpiece.generate_strikes"  # Unique ID (prefix with 'mesh.' for convention)
+    bl_label = "Generate a series of strikes"
+    bl_description = "Generates a series of non-overlapping set of strikes on top and bottom surface of the workpiece"
     bl_options = {'REGISTER', 'UNDO'}  # Enables undo/redo
 
     def execute(self, context):
-
         obj = context.active_object
         if obj is None or obj.type != 'MESH':
             self.report({'ERROR'}, "No active mesh object selected!")
             return {'CANCELLED'}
+        # Move the workpiece to the Collection, if it's not already there
+        if bpy.data.collections.get('Collection')==None: # If not, create a collection "Collection"
+            bpy.ops.object.move_to_collection(collection_index=0, is_new=True, new_collection_name="Collection")
+        else:
+            bpy.ops.object.move_to_collection(collection_index=1)
         
+        # Create a new collection "Strikes" for strike objects
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(False)
+        if bpy.data.collections.get('Strikes')==None: # If not, create a collection "Strikes"
+            bpy.ops.collection.create(name="Strikes")
+            strikes_collection = bpy.data.collections["Strikes"]
+            bpy.context.scene.collection.children.link(strikes_collection) # link collection to the Scene Collection
+        else:
+            # Remove old "Strikes" collection and all of its objects
+            for strike_object in bpy.data.collections.get('Strikes').objects[:]:
+                bpy.data.objects.remove(strike_object, do_unlink=True)
+            bpy.data.collections.remove(bpy.data.collections["Strikes"])
+            # Create a new collection "Strikes" for strike objects
+            bpy.ops.collection.create(name="Strikes")
+            strikes_collection = bpy.data.collections["Strikes"]
+            bpy.context.scene.collection.children.link(strikes_collection) # link collection to the Scene Collection
+
         mesh = obj.data  # Access the mesh data block
-        strikes = mesh.Strikes  # Your custom collection
+        strikes = mesh.Strikes
         strike_settings = bpy.data.scenes['Scene'].StrikeSettings
         
         # Clear existing strikes (optional; comment out if you want to append)
@@ -107,26 +137,24 @@ class GenerateStrikesOperator(bpy.types.Operator):
                 width = strike_settings.strike_width/strike_settings.strike_length
                 bpy.ops.mesh.primitive_ico_sphere_add(
                     radius=strike_settings.strike_length/2, 
-                    scale=(1, width, 0.1)
+                    scale=(1, width, 0.2)
                     )
                 strike_obj = bpy.context.selected_objects[0]
                 strike_obj.name = f"Strike_{strike.ID}"
                 strike_obj.rotation_euler[2] = strike.orientation*np.pi/180 # rotation angle in radians
-            
-        bpy.ops.object.select_all(action='SELECT') # select all strike objects
-        obj.select_set(False) # except original workpiece mesh
-        bpy.ops.collection.create(name="Strikes") # move them to the new collection
-        strikes_collection = bpy.data.collections["Strikes"]
-        bpy.context.scene.collection.children.link(strikes_collection) # link collection to the Scene Collection
-        for i in bpy.data.scenes['Scene'].collection.objects[1:]:
-            bpy.data.scenes['Scene'].collection.objects.unlink(i) # remove the strike object from current collection
+                bpy.ops.object.move_to_collection(collection_index=2)
+            # Force viewport redraw
+            for area in context.window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
 
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
-        bpy.ops.view3d.snap_cursor_to_center()
-
-
+        bpy.data.scenes["Scene"].cursor.location[0] = 0
+        bpy.data.scenes["Scene"].cursor.location[1] = 0
+        bpy.data.scenes["Scene"].cursor.location[2] = 0
+        self.report({'INFO'}, f"{strike_settings.number_of_strikes} successfully generated!")
         return {'FINISHED'}
 
     def _check_no_overlap(self, mesh, min_distance_padding, strike_length, strike_width):
@@ -150,6 +178,71 @@ class GenerateStrikesOperator(bpy.types.Operator):
                 return False
         return True
 
+class STRIKEGEN_OT_WriteStrikesCSV(Operator):
+    bl_idname = "workpiece.write_strikes_csv"
+    bl_label = "Write strikes to a CSV"
+    bl_description = "Writes all strikes that were generated for some workpiece to a CSV file"
+    bl_options = {'REGISTER', 'UNDO'}  # Enables undo/redo
+
+    def execute(self, context):
+        export_file = bpy.data.scenes['Scene'].StrikeSettings.strike_export_dir + f"generated_strikes.csv"
+        if context.scene.StrikeSettings.process_all_files:
+            input_directory = context.scene.stl_directory
+            self.report({'INFO'}, f"Generating and saving all files from {input_directory} to the {export_file}")
+            stl_files = [f for f in os.listdir(input_directory) if f.lower().endswith('.stl')]
+            for file in stl_files:
+                # 1. Import a STL file
+                bpy.ops.object.select_all(action='SELECT')
+                bpy.ops.object.delete()
+                context.scene.stl_file = os.path.join(input_directory,file) # set a file to inport
+                bpy.ops.workpiece.import_stl()
+                # 2. Canonical Alignment - AUTO
+                bpy.ops.workpiece.alignment()
+                # 3. Strike generation
+                bpy.ops.workpiece.generate_strikes()
+                # 4. Save strike data to a .csv file
+                obj = context.active_object
+                if obj is None or obj.type != 'MESH':
+                    self.report({'ERROR'}, "No active mesh object selected!")
+                    return {'CANCELLED'}
+                self.report({'INFO'}, f"{obj.name}: Writing strike data to CSV file...")
+                # Collect all strikes and their properties
+                strike_data = []
+                for strike in obj.data.Strikes[:]:
+                    strike_data.append([obj.name, strike.ID, strike.x_location, strike.y_location, strike.z_location, strike.orientation])
+                # Open a CSV file and write to it
+                my_mode = "a" if os.path.exists(export_file) else "w"
+                with open(export_file, mode=my_mode, newline="") as file:
+                    writer = csv.writer(file)
+                    if my_mode != "a":
+                        writer.writerow(['workpiece', 'ID', 'X', 'Y', 'Z', 'alpha']) # write this line only at file creation
+                    writer.writerows(strike_data)
+                self.report({'INFO'}, f"Strike data saved to: {export_file}")
+                # Force viewport redraw
+                for area in context.window.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+        else:
+            obj = context.active_object
+            if obj is None or obj.type != 'MESH':
+                self.report({'ERROR'}, "No active mesh object selected!")
+                return {'CANCELLED'}
+            self.report({'INFO'}, f"{obj.name}: Writing strike data to CSV file...")
+            # Collect all strikes and their properties
+            strike_data = []
+            for strike in obj.data.Strikes[:]:
+                strike_data.append([obj.name, strike.ID, strike.x_location, strike.y_location, strike.z_location, strike.orientation])
+            # Open a CSV file and write to it
+            my_mode = "a" if os.path.exists(export_file) else "w"
+            with open(export_file, mode=my_mode, newline="") as file:
+                writer = csv.writer(file)
+                if my_mode != "a":
+                    writer.writerow(['workpiece', 'ID', 'X', 'Y', 'Z', 'alpha']) # write this line only at file creation
+                writer.writerows(strike_data)
+            self.report({'INFO'}, f"Strike data saved to: {export_file}")
+            return {'FINISHED'}
+
+
 class STRIKEGEN_PT_MainPanel(Panel):
     bl_label = "Strike Generator"
     bl_idname = "STRIKEGEN_PT_MainPanel"
@@ -171,4 +264,12 @@ class STRIKEGEN_PT_MainPanel(Panel):
         box.prop(strike_settings, "number_of_strikes")
         layout.separator()
         layout.label(text="Generate Strikes")
-        layout.operator("mesh.generate_strikes", text="Generate")
+        layout.operator("workpiece.generate_strikes", text="Generate")
+        layout.label(text="Write Strikes to a CSV file")
+        box2 = layout.box()
+        row = box2.row()
+        row.prop(context.scene, "stl_directory")
+        row.prop(strike_settings, "process_all_files", text="All files")
+        box2.prop(strike_settings, "strike_export_dir")
+        layout.operator("workpiece.write_strikes_csv", text="Write CSV")
+

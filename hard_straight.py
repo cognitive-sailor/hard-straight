@@ -18,14 +18,14 @@ class WORKPIECE_OT_ImportSTL(Operator):
 
     def execute(self, context):
         # Set the Unit settings to Metric and mm, scale to 0.001
-        bpy.context.scene.unit_settings.system = 'METRIC'
-        bpy.context.scene.unit_settings.scale_length = 0.001  # Set scale to mm
-        bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
+        bpy.data.scenes['Scene'].unit_settings.system = 'METRIC'
+        bpy.data.scenes['Scene'].unit_settings.scale_length = 0.001  # Set scale to mm
+        bpy.data.scenes['Scene'].unit_settings.length_unit = 'MILLIMETERS'
         # Set the viewport properties
-        bpy.context.space_data.clip_start = 0.1 # Minimum distance to the camera = 0.1 mm
-        bpy.context.space_data.clip_end = 10000.0 # Maximum distance to the camera = 10 m
-        bpy.context.space_data.overlay.grid_scale = 0.001 # Set grid scale to 1 mm
-        bpy.context.space_data.overlay.show_axis_z = True # Show Z axis in the viewport
+        bpy.data.screens['Layout'].areas[3].spaces[0].clip_start = 0.1 # Minimum distance to the camera = 0.1 mm
+        bpy.data.screens['Layout'].areas[3].spaces[0].clip_end = 10000.0 # Maximum distance to the camera = 10 m
+        bpy.data.screens['Layout'].areas[3].spaces[0].overlay.grid_scale = 0.001 # Set grid scale to 1 mm
+        bpy.data.screens['Layout'].areas[3].spaces[0].overlay.show_axis_z = True # Show Z axis in the viewport
 
         stl_file = bpy.context.scene.stl_file
         if not stl_file or not (stl_file.endswith('.stl') or stl_file.endswith('.STL')):
@@ -36,6 +36,8 @@ class WORKPIECE_OT_ImportSTL(Operator):
 
         for mesh in bpy.data.meshes:
             bpy.data.meshes.remove(mesh)
+        for object in bpy.data.objects:
+            bpy.data.objects.remove(object)
 
         try:
             bpy.ops.wm.stl_import(filepath=stl_file)
@@ -48,6 +50,11 @@ class WORKPIECE_OT_ImportSTL(Operator):
         bpy.types.Scene.stl_mesh = bpy.data.objects[0]
 
         self.report({'INFO'}, f"Imported {obj.name} in {time.time() - t:.3f} seconds")
+
+        # Force viewport redraw
+        for area in context.window.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
         return {'FINISHED'}
 
 class WORKPIECE_OT_Alignment(Operator):
@@ -99,6 +106,7 @@ class WORKPIECE_OT_Alignment(Operator):
             self.report({'INFO'}, f"Eigenvalues: {eigenvalues[order]}")
             self.report({'INFO'}, f"Eigenvectors:\n{eigenvectors}")
             self.report({'INFO'}, f"Centroid: {mean}")
+            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
             # Check for degenerate PCA
             if np.linalg.matrix_rank(cov_matrix) < 3:
@@ -139,6 +147,25 @@ class WORKPIECE_OT_Alignment(Operator):
                 dots_neg_pc2 = np.dot(face_normals, -norm_pc2)
                 pc2_pos_faces = np.where(dots_pc2 >= cos_70_percent)[0]
                 pc2_neg_faces = np.where(dots_neg_pc2 >= cos_70_percent)[0]
+            mesh_poly_normals = np.array([np.array([n.vector.x,
+                                           n.vector.y,
+                                           n.vector.z]) for n in mesh.polygon_normals[:]])
+            pc2_pos_polygon_normals = [i for i in mesh_poly_normals if np.dot(i,norm_pc2)/(np.linalg.norm(i) * np.linalg.norm(norm_pc2)) >= cos_70_percent]
+            pc2_neg_polygon_normals = [i for i in mesh_poly_normals if np.dot(i,-norm_pc2)/(np.linalg.norm(i) * np.linalg.norm(-norm_pc2)) >= cos_70_percent]
+            mean_pc2_pos_poly_norm = np.mean(pc2_pos_polygon_normals, axis=0)
+            mean_pc2_neg_poly_norm = np.mean(pc2_neg_polygon_normals, axis=0)
+            self.report({'INFO'}, f"Mean front normals = {mean_pc2_pos_poly_norm}")
+            
+            # The front surface is ALWAYS tilted towards top surface, check
+            beta1 = np.dot(mean_pc2_pos_poly_norm, norm_pc3)/(np.linalg.norm(mean_pc2_pos_poly_norm) * np.linalg.norm(norm_pc3))
+            self.report({'INFO'}, f"beta1 = {beta1}")
+            beta2 = np.dot(mean_pc2_pos_poly_norm, -norm_pc3)/(np.linalg.norm(mean_pc2_pos_poly_norm) * np.linalg.norm(-norm_pc3))
+            if beta2 > beta1:
+                norm_pc3 = -norm_pc3
+                dots_pc3 = np.dot(face_normals, norm_pc3)
+                dots_neg_pc3 = np.dot(face_normals, -norm_pc3)
+                pc3_pos_faces = np.where(dots_pc3 >= cos_95_percent)[0]
+                pc3_neg_faces = np.where(dots_neg_pc3 >= cos_95_percent)[0]
 
             # Step 4: Calculate the right-handed PC1, according to the norm_pc3 and norm_pc2
             z_axis = norm_pc3
@@ -169,6 +196,7 @@ class WORKPIECE_OT_Alignment(Operator):
             self.report({'INFO'}, f"PC3 (+): {count_pc3} faces, PC3 (-): {count_neg_pc3} faces")
             if len(face_normals) > 0:
                 self.report({'INFO'}, f"Sample face normals (first 3): {face_normals[:3]}")
+            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
             # Step 6: Create vertex groups for +PC3 and -PC3, +PC2 and -PC2, +PC1 and -PC1
             vertex_coords = {
@@ -274,6 +302,11 @@ class WORKPIECE_OT_Alignment(Operator):
                 for face_idx in face_indices:
                     mesh.polygons[face_idx].material_index = mat_index
                 self.report({'INFO'}, f"Assigned material '{mat_name}' to {len(face_indices)} faces (vertex group '{vg_name}')")
+            
+            # Force viewport redraw
+            for area in context.window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
 
             # Step 7: Construct rotation matrix to align current orientation to target (X, Y, Z)
             x_axis = np.cross(y_axis, z_axis)  # Compute PC1 (orthogonal to PC2 and PC3)
@@ -309,6 +342,7 @@ class WORKPIECE_OT_Alignment(Operator):
             obj.select_set(True)
             bpy.context.view_layer.objects.active = obj
             bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
 
             # Step 8: Find vertices with minimum x, y, z coordinates and translate mesh
             vertices_world = [obj.matrix_world @ v.co for v in mesh.vertices]
@@ -331,6 +365,10 @@ class WORKPIECE_OT_Alignment(Operator):
             # Apply translation
             obj.matrix_world = Matrix.Translation(translation_vector) @ obj.matrix_world
             bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            # Force viewport redraw
+            for area in context.window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
             
             # Debug: Verify new positions of minimum vertices
             vertices_world_after = [obj.matrix_world @ v.co for v in mesh.vertices]
@@ -340,7 +378,6 @@ class WORKPIECE_OT_Alignment(Operator):
             self.report({'INFO'}, f"New Min X vertex: x={new_x:.6f} (should be ~0)")
             self.report({'INFO'}, f"New Min Y vertex: y={new_y:.6f} (should be ~0)")
             self.report({'INFO'}, f"New Min Z vertex: z={new_z:.6f} (should be ~0)")
-
             self.report({'INFO'}, f"Aligned {obj.name} using PCA and translated to min vertices at (0,0,0)")
 
         elif context.scene.alignment_mode == '3-2-1':
@@ -438,6 +475,7 @@ class WORKPIECE_OT_Flatness(Operator):
                 flatness = np.max(valid_distances) - np.min(valid_distances) if len(valid_distances) > 1 else 0.0
                 row.update({vg_name+"_"+sigma_label:flatness})
                 self.report({'INFO'}, f"Flatness ({sigma_label}) for '{vg_name}': {flatness:.6f} mm ({len(valid_distances)} vertices)")
+        
             
         flatness_data.append(row)
         save_directory = os.path.dirname(bpy.context.scene.stl_file)
@@ -454,6 +492,10 @@ class WORKPIECE_OT_Flatness(Operator):
                 writer.writeheader()
             writer.writerows(flatness_data)
         self.report({'INFO'}, f"Flatness calculation completed in {time.time() - t:.3f} seconds")
+        # Force viewport redraw
+        for area in context.window.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
         return {'FINISHED'}
     
 class WORKPIECE_OT_Batch(Operator):
@@ -466,7 +508,7 @@ class WORKPIECE_OT_Batch(Operator):
         self.report({'INFO'}, f"Started Batch Processing")
         input_directory = Path(context.scene.stl_directory)
         self.report({'INFO'}, f"Directory for batch processing: {input_directory}")
-        stl_files = os.listdir(input_directory)
+        stl_files = [f for f in os.listdir(input_directory) if f.lower().endswith('.stl')]
         for file in stl_files:
             # 1. Import a STL file
             bpy.ops.object.select_all(action='SELECT')
