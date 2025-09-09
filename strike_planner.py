@@ -77,18 +77,18 @@ class STRIKEGEN_OT_GenerateStrikes(Operator):
         # Create a new collection "Strikes" for strike objects
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(False)
-        if bpy.data.collections.get('Strikes')==None: # If not, create a collection "Strikes"
-            bpy.ops.collection.create(name="Strikes")
-            strikes_collection = bpy.data.collections["Strikes"]
+        if bpy.data.collections.get(f'Strikes_{obj.name}')==None: # If not, create a collection "Strikes"
+            bpy.ops.collection.create(name=f"Strikes_{obj.name}")
+            strikes_collection = bpy.data.collections[f"Strikes_{obj.name}"]
             bpy.context.scene.collection.children.link(strikes_collection) # link collection to the Scene Collection
         else:
             # Remove old "Strikes" collection and all of its objects
-            for strike_object in bpy.data.collections.get('Strikes').objects[:]:
+            for strike_object in bpy.data.collections.get(f'Strikes_{obj.name}').objects[:]:
                 bpy.data.objects.remove(strike_object, do_unlink=True)
-            bpy.data.collections.remove(bpy.data.collections["Strikes"])
+            bpy.data.collections.remove(bpy.data.collections[f"Strikes_{obj.name}"])
             # Create a new collection "Strikes" for strike objects
-            bpy.ops.collection.create(name="Strikes")
-            strikes_collection = bpy.data.collections["Strikes"]
+            bpy.ops.collection.create(name=f"Strikes_{obj.name}")
+            strikes_collection = bpy.data.collections[f"Strikes_{obj.name}"]
             bpy.context.scene.collection.children.link(strikes_collection) # link collection to the Scene Collection
 
         mesh = obj.data  # Access the mesh data block
@@ -142,7 +142,13 @@ class STRIKEGEN_OT_GenerateStrikes(Operator):
                 strike_obj = bpy.context.selected_objects[0]
                 strike_obj.name = f"Strike_{strike.ID}"
                 strike_obj.rotation_euler[2] = strike.orientation*np.pi/180 # rotation angle in radians
-                bpy.ops.object.move_to_collection(collection_index=2)
+                strikes_collection.objects.link(strike_obj)
+                # Unlink the object from scene collection
+                try:
+                    bpy.data.scenes['Scene'].collection.objects.unlink(strike_obj)
+                except:
+                    self.report({'INFO'}, f"Object {strike_obj.name} not in scene collection!")
+                
             # Force viewport redraw
             for area in context.window.screen.areas:
                 if area.type == 'VIEW_3D':
@@ -190,10 +196,13 @@ class STRIKEGEN_OT_WriteStrikesCSV(Operator):
             input_directory = context.scene.stl_directory
             self.report({'INFO'}, f"Generating and saving all files from {input_directory} to the {export_file}")
             stl_files = [f for f in os.listdir(input_directory) if f.lower().endswith('.stl')]
+            # Remove all previous collections
+            for c in bpy.data.collections:
+                bpy.data.collections.remove(c)
             for file in stl_files:
                 # 1. Import a STL file
-                bpy.ops.object.select_all(action='SELECT')
-                bpy.ops.object.delete()
+                # bpy.ops.object.select_all(action='SELECT')
+                # bpy.ops.object.delete()
                 context.scene.stl_file = os.path.join(input_directory,file) # set a file to inport
                 bpy.ops.workpiece.import_stl()
                 # 2. Canonical Alignment - AUTO
@@ -240,7 +249,7 @@ class STRIKEGEN_OT_WriteStrikesCSV(Operator):
                     writer.writerow(['workpiece', 'ID', 'X', 'Y', 'Z', 'alpha']) # write this line only at file creation
                 writer.writerows(strike_data)
             self.report({'INFO'}, f"Strike data saved to: {export_file}")
-            return {'FINISHED'}
+        return {'FINISHED'}
 
 
 class STRIKEGEN_PT_MainPanel(Panel):
